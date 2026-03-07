@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesh Network Analytics</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;400;600;700&family=Barlow+Condensed:wght@400;700&display=swap');
+
+  :root {
+    --bg:       #080c10;
+    --panel:    #0d1117;
+    --border:   #1c2a3a;
+    --accent:   #00e5ff;
+    --wifi:     #4fc3f7;
+    --ble:      #69f0ae;
+    --lora:     #ffab40;
+    --dim:      #3a4a5a;
+    --text:     #cdd6e0;
+    --text-dim: #556070;
+    --danger:   #ff5252;
+    --good:     #69f0ae;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Barlow', sans-serif;
+    font-weight: 300;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,229,255,0.015) 2px,
+      rgba(0,229,255,0.015) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(90deg, #0d1117 0%, #0a1520 100%);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  .logo-title {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  .logo-sub {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .live-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+  }
+
+  .live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--good);
+    box-shadow: 0 0 6px var(--good);
+    animation: pulse 2s infinite;
+  }
+
+  .live-dot.offline { background: var(--danger); box-shadow: 0 0 6px var(--danger); animation: none; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.3; }
+  }
+
+  #last-update {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  /* ── Objective selector ── */
+  .obj-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 32px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+
+  .obj-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    margin-right: 8px;
+  }
+
+  .obj-btn {
+    padding: 6px 20px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .obj-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .obj-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--bg);
+  }
+
+  /* ── Layout ── */
+  .page { padding: 24px 32px; display: grid; gap: 20px; }
+
+  /* ── Stat cards row ── */
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+
+  .stat-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 16px 20px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+
+  .stat-card.wifi-card::before  { background: var(--wifi); }
+  .stat-card.ble-card::before   { background: var(--ble); }
+  .stat-card.lora-card::before  { background: var(--lora); }
+  .stat-card.info-card::before  { background: var(--accent); }
+
+  .stat-card-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  .stat-big {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 36px;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+
+  .stat-card.wifi-card .stat-big { color: var(--wifi); }
+  .stat-card.ble-card  .stat-big { color: var(--ble); }
+  .stat-card.lora-card .stat-big { color: var(--lora); }
+  .stat-card.info-card .stat-big { color: var(--accent); }
+
+  .stat-unit {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .stat-sub {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+    display: flex;
+    gap: 16px;
+  }
+
+  .stat-sub span { display: flex; flex-direction: column; }
+  .stat-sub .sub-val { color: var(--text); font-weight: 600; }
+
+  /* ── Main grid ── */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 20px;
+  }
+
+  .panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .panel-title {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+
+  .panel-tag {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+  }
+
+  /* ── Node grid ── */
+  .node-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+  }
+
+  .node-card {
+    border: 1px solid var(--border);
+    padding: 12px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+
+  .node-card:hover, .node-card.selected {
+    border-color: var(--accent);
+    background: rgba(0,229,255,0.05);
+  }
+
+  .node-id {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1;
+  }
+
+  .node-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+    margin-top: 4px;
+  }
+
+  .node-best {
+    margin-top: 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    padding: 2px 6px;
+    display: inline-block;
+    letter-spacing: 1px;
+  }
+
+  .node-best.wifi { background: rgba(79,195,247,0.15); color: var(--wifi); }
+  .node-best.ble  { background: rgba(105,240,174,0.15); color: var(--ble); }
+  .node-best.lora { background: rgba(255,171,64,0.15); color: var(--lora); }
+
+  .node-gateway {
+    position: absolute;
+    top: 4px; right: 4px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 8px;
+    color: var(--accent);
+    letter-spacing: 1px;
+  }
+
+  /* ── Chart containers ── */
+  .chart-wrap {
+    position: relative;
+    height: 200px;
+  }
+
+  /* ── Comparison bars ── */
+  .compare-row {
+    display: grid;
+    gap: 14px;
+  }
+
+  .compare-item { display: grid; gap: 6px; }
+
+  .compare-header {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+  }
+
+  .compare-name { letter-spacing: 2px; }
+  .compare-val  { color: var(--text); }
+
+  .compare-track {
+    height: 6px;
+    background: var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .compare-fill {
+    height: 100%;
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* ── Route table ── */
+  .route-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .route-table th {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+  }
+
+  .route-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(28,42,58,0.5);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+  }
+
+  .route-table tr:last-child td { border-bottom: none; }
+  .route-table tr:hover td { background: rgba(0,229,255,0.03); }
+
+  .link-badge {
+    padding: 2px 8px;
+    font-size: 10px;
+    letter-spacing: 1px;
+    font-family: 'Share Tech Mono', monospace;
+  }
+
+  .link-badge.wifi { background: rgba(79,195,247,0.15);  color: var(--wifi); }
+  .link-badge.ble  { background: rgba(105,240,174,0.15); color: var(--ble); }
+  .link-badge.lora { background: rgba(255,171,64,0.15);  color: var(--lora); }
+
+  /* ── Full-width panel ── */
+  .full-panel { grid-column: 1 / -1; }
+
+  /* ── No data state ── */
+  .no-data {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 120px;
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 2px;
+    gap: 8px;
+  }
+
+  .no-data-icon { font-size: 24px; opacity: 0.3; }
+
+  /* ── History selector ── */
+  .history-controls {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .hist-btn {
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .hist-btn:hover, .hist-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="logo">
+    <div class="logo-title">Mesh Analytics</div>
+    <div class="logo-sub">CSC2106 · TEAM 8 · IoT PROTOCOLS</div>
+  </div>
+  <div class="header-right">
+    <div id="last-update">--:--:--</div>
+    <div class="live-indicator">
+      <div class="live-dot" id="live-dot"></div>
+      <span id="live-status">CONNECTING</span>
+    </div>
+  </div>
+</header>
+
+<!-- Objective bar -->
+<div class="obj-bar">
+  <div class="obj-label">OBJECTIVE //</div>
+  <button class="obj-btn active" data-obj="latency"     onclick="setObjective(this)">Latency</button>
+  <button class="obj-btn"        data-obj="reliability" onclick="setObjective(this)">Reliability</button>
+  <button class="obj-btn"        data-obj="energy"      onclick="setObjective(this)">Energy</button>
+</div>
+
+<!-- Page content -->
+<div class="page">
+
+  <!-- Summary cards -->
+  <div class="stat-row">
+    <div class="stat-card wifi-card">
+      <div class="stat-card-label">Wi-Fi · Avg Latency</div>
+      <div class="stat-big" id="wifi-lat">--</div>
+      <div class="stat-unit">ms</div>
+      <div class="stat-sub">
+        <span><div class="sub-val" id="wifi-pdr">--%</div><div>PDR</div></span>
+        <span><div class="sub-val" id="wifi-jitter">--ms</div><div>Jitter</div></span>
+        <span><div class="sub-val" id="wifi-rssi">--dBm</div><div>RSSI</div></span>
+      </div>
+    </div>
+    <div class="stat-card ble-card">
+      <div class="stat-card-label">BLE · Avg Latency</div>
+      <div class="stat-big" id="ble-lat">--</div>
+      <div class="stat-unit">ms</div>
+      <div class="stat-sub">
+        <span><div class="sub-val" id="ble-pdr">--%</div><div>PDR</div></span>
+        <span><div class="sub-val" id="ble-jitter">--ms</div><div>Jitter</div></span>
+        <span><div class="sub-val" id="ble-rssi">--dBm</div><div>RSSI</div></span>
+      </div>
+    </div>
+    <div class="stat-card lora-card">
+      <div class="stat-card-label">LoRa · Avg Latency</div>
+      <div class="stat-big" id="lora-lat">--</div>
+      <div class="stat-unit">ms</div>
+      <div class="stat-sub">
+        <span><div class="sub-val" id="lora-pdr">--%</div><div>PDR</div></span>
+        <span><div class="sub-val" id="lora-jitter">--ms</div><div>Jitter</div></span>
+        <span><div class="sub-val" id="lora-rssi">--dBm</div><div>RSSI</div></span>
+      </div>
+    </div>
+    <div class="stat-card info-card">
+      <div class="stat-card-label">Network Status</div>
+      <div class="stat-big" id="active-nodes">--</div>
+      <div class="stat-unit">active nodes</div>
+      <div class="stat-sub">
+        <span><div class="sub-val" id="total-packets">--</div><div>Packets</div></span>
+        <span><div class="sub-val" id="best-link">--</div><div>Best Link</div></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Node overview + comparison -->
+  <div class="main-grid">
+
+    <!-- Node cards -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Node Status</div>
+        <div class="panel-tag">Click to inspect</div>
+      </div>
+      <div class="node-grid" id="node-grid">
+        <div class="no-data"><div class="no-data-icon">◌</div>Awaiting data</div>
+      </div>
+    </div>
+
+    <!-- Protocol comparison bars -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Protocol Comparison</div>
+        <div class="panel-tag" id="compare-metric-label">AVG LATENCY (ms)</div>
+      </div>
+      <div class="compare-row" id="compare-bars">
+        <div class="no-data"><div class="no-data-icon">◌</div>Awaiting data</div>
+      </div>
+    </div>
+
+    <!-- Latency history chart -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Latency History</div>
+        <div class="panel-tag" id="history-node-label">ALL NODES</div>
+      </div>
+      <div class="history-controls">
+        <button class="hist-btn active" onclick="setHistoryLink('wifi',  this)">WiFi</button>
+        <button class="hist-btn"        onclick="setHistoryLink('ble',   this)">BLE</button>
+        <button class="hist-btn"        onclick="setHistoryLink('lora',  this)">LoRa</button>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="latency-chart"></canvas>
+      </div>
+    </div>
+
+    <!-- PDR chart -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Packet Delivery Ratio</div>
+        <div class="panel-tag">ALL PROTOCOLS</div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="pdr-chart"></canvas>
+      </div>
+    </div>
+
+    <!-- Routing table (full width) -->
+    <div class="panel full-panel">
+      <div class="panel-header">
+        <div class="panel-title">Active Routing Table</div>
+        <div class="panel-tag" id="route-objective-label">OBJECTIVE: LATENCY</div>
+      </div>
+      <table class="route-table">
+        <thead>
+          <tr>
+            <th>Source Node</th>
+            <th>Destination</th>
+            <th>Next Hop</th>
+            <th>Link</th>
+            <th>Cost</th>
+          </tr>
+        </thead>
+        <tbody id="route-tbody">
+          <tr><td colspan="5"><div class="no-data"><div class="no-data-icon">◌</div>Awaiting routing data</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:5050/api';
+let currentObjective = 'latency';
+let currentHistoryLink = 'wifi';
+let selectedNode = null;
+let latencyChart = null;
+let pdrChart = null;
+
+// ── Chart setup ────────────────────────────────────────────────────────────
+
+const chartDefaults = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: { legend: { display: false } },
+  scales: {
+    x: {
+      grid:  { color: '#1c2a3a' },
+      ticks: { color: '#556070', font: { family: 'Share Tech Mono', size: 9 } },
+    },
+    y: {
+      grid:  { color: '#1c2a3a' },
+      ticks: { color: '#556070', font: { family: 'Share Tech Mono', size: 9 } },
+    },
+  },
+};
+
+function initCharts() {
+  const lCtx = document.getElementById('latency-chart').getContext('2d');
+  latencyChart = new Chart(lCtx, {
+    type: 'line',
+    data: { labels: [], datasets: [{
+      label: 'Latency (ms)',
+      data: [],
+      borderColor: '#4fc3f7',
+      backgroundColor: 'rgba(79,195,247,0.08)',
+      borderWidth: 2,
+      pointRadius: 2,
+      tension: 0.4,
+      fill: true,
+    }]},
+    options: { ...chartDefaults },
+  });
+
+  const pCtx = document.getElementById('pdr-chart').getContext('2d');
+  pdrChart = new Chart(pCtx, {
+    type: 'bar',
+    data: {
+      labels: ['Wi-Fi', 'BLE', 'LoRa'],
+      datasets: [{
+        data: [0, 0, 0],
+        backgroundColor: ['rgba(79,195,247,0.6)', 'rgba(105,240,174,0.6)', 'rgba(255,171,64,0.6)'],
+        borderColor:      ['#4fc3f7', '#69f0ae', '#ffab40'],
+        borderWidth: 1,
+      }],
+    },
+    options: {
+      ...chartDefaults,
+      scales: {
+        ...chartDefaults.scales,
+        y: { ...chartDefaults.scales.y, min: 0, max: 100,
+             ticks: { ...chartDefaults.scales.y.ticks, callback: v => v + '%' } },
+      },
+    },
+  });
+}
+
+// ── Data fetching ───────────────────────────────────────────────────────────
+
+async function fetchAll() {
+  try {
+    const [latest, comparison, routes, stats] = await Promise.all([
+      fetch(`${API}/latest`).then(r => r.json()),
+      fetch(`${API}/comparison`).then(r => r.json()),
+      fetch(`${API}/routes`).then(r => r.json()),
+      fetch(`${API}/stats`).then(r => r.json()),
+    ]);
+
+    updateStatus(true);
+    updateSummaryCards(comparison);
+    updateNodeGrid(latest);
+    updateCompareBars(comparison);
+    updatePdrChart(comparison);
+    updateRouteTable(routes);
+    updateNetworkStats(stats);
+    fetchHistory();
+
+    document.getElementById('last-update').textContent =
+      new Date().toLocaleTimeString('en-GB', { hour12: false });
+
+  } catch(e) {
+    updateStatus(false);
+    console.warn('API error:', e);
+  }
+}
+
+async function fetchHistory() {
+  const nodeParam = selectedNode ? `&node=${selectedNode}` : '';
+  try {
+    const data = await fetch(
+      `${API}/history?link=${currentHistoryLink}${nodeParam}&limit=40`
+    ).then(r => r.json());
+
+    const labels = data.map(d => {
+      const t = new Date(d.wall_time);
+      return t.toLocaleTimeString('en-GB', { hour12: false, second: '2-digit' });
+    });
+    const values = data.map(d => d.avg_latency_ms);
+
+    const colours = { wifi: '#4fc3f7', ble: '#69f0ae', lora: '#ffab40' };
+    const col = colours[currentHistoryLink];
+
+    latencyChart.data.labels = labels;
+    latencyChart.data.datasets[0].data = values;
+    latencyChart.data.datasets[0].borderColor = col;
+    latencyChart.data.datasets[0].backgroundColor = col + '14';
+    latencyChart.update('none');
+
+  } catch(e) { /* silent */ }
+}
+
+// ── UI updaters ─────────────────────────────────────────────────────────────
+
+function updateStatus(online) {
+  const dot = document.getElementById('live-dot');
+  const lbl = document.getElementById('live-status');
+  dot.className = 'live-dot' + (online ? '' : ' offline');
+  lbl.textContent = online ? 'LIVE' : 'OFFLINE';
+}
+
+function updateSummaryCards(comparison) {
+  const byLink = {};
+  comparison.forEach(r => { byLink[r.link_type] = r; });
+
+  ['wifi','ble','lora'].forEach(lt => {
+    const d = byLink[lt] || {};
+    document.getElementById(`${lt}-lat`).textContent    = d.avg_lat    ? d.avg_lat.toFixed(0)    : '--';
+    document.getElementById(`${lt}-pdr`).textContent    = d.avg_pdr    ? d.avg_pdr.toFixed(1)+'%': '--%';
+    document.getElementById(`${lt}-jitter`).textContent = d.avg_jitter ? d.avg_jitter.toFixed(1)+'ms':'--ms';
+    document.getElementById(`${lt}-rssi`).textContent   = d.avg_rssi   ? d.avg_rssi.toFixed(0)+'dBm':'--dBm';
+  });
+
+  // Best link for current objective
+  let best = '--';
+  if (comparison.length) {
+    if (currentObjective === 'latency') {
+      best = comparison.reduce((a,b) => a.avg_lat < b.avg_lat ? a : b).link_type;
+    } else if (currentObjective === 'reliability') {
+      best = comparison.reduce((a,b) => a.avg_pdr > b.avg_pdr ? a : b).link_type;
+    } else {
+      const order = ['ble','lora','wifi'];
+      best = order.find(lt => comparison.find(r => r.link_type === lt)) || '--';
+    }
+  }
+  document.getElementById('best-link').textContent = best.toUpperCase();
+}
+
+function updateNetworkStats(stats) {
+  document.getElementById('active-nodes').textContent  = stats.active_nodes  || '--';
+  document.getElementById('total-packets').textContent = stats.total_packets || '--';
+}
+
+function updateNodeGrid(latest) {
+  const grid = document.getElementById('node-grid');
+  if (!latest.length) return;
+
+  grid.innerHTML = '';
+  latest.forEach(node => {
+    const links = node.links || {};
+    const best  = getBestLink(links, currentObjective);
+
+    const isGateway = node.node_id === 5;
+    const isSelected = node.node_id === selectedNode;
+
+    const card = document.createElement('div');
+    card.className = 'node-card' + (isSelected ? ' selected' : '');
+    card.onclick   = () => { selectedNode = node.node_id; fetchAll(); };
+    card.innerHTML = `
+      ${isGateway ? '<div class="node-gateway">GW</div>' : ''}
+      <div class="node-id">${node.node_id}</div>
+      <div class="node-label">NODE</div>
+      ${best ? `<div class="node-best ${best}">${best.toUpperCase()}</div>` : ''}
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function updateCompareBars(comparison) {
+  const container = document.getElementById('compare-bars');
+  if (!comparison.length) return;
+
+  const metric = currentObjective === 'latency'     ? 'avg_lat'    :
+                 currentObjective === 'reliability' ? 'avg_pdr'    : 'avg_lat';
+  const label  = currentObjective === 'latency'     ? 'AVG LATENCY (ms)' :
+                 currentObjective === 'reliability' ? 'AVG PDR (%)' : 'AVG LATENCY (ms)';
+
+  document.getElementById('compare-metric-label').textContent = label;
+
+  const maxVal = Math.max(...comparison.map(r => r[metric] || 0)) || 1;
+  const colours = { wifi: '#4fc3f7', ble: '#69f0ae', lora: '#ffab40' };
+  const names   = { wifi: 'WI-FI', ble: 'BLE', lora: 'LoRa' };
+
+  container.innerHTML = '';
+  ['wifi','ble','lora'].forEach(lt => {
+    const row  = comparison.find(r => r.link_type === lt) || {};
+    const val  = row[metric] || 0;
+    // For latency: lower is better, invert bar width
+    const pct  = currentObjective === 'latency'
+      ? (1 - val / maxVal) * 100
+      : (val / maxVal) * 100;
+
+    const item = document.createElement('div');
+    item.className = 'compare-item';
+    item.innerHTML = `
+      <div class="compare-header">
+        <span class="compare-name" style="color:${colours[lt]}">${names[lt]}</span>
+        <span class="compare-val">${val.toFixed(1)}</span>
+      </div>
+      <div class="compare-track">
+        <div class="compare-fill" style="width:${pct}%;background:${colours[lt]}"></div>
+      </div>
+    `;
+    container.appendChild(item);
+  });
+}
+
+function updatePdrChart(comparison) {
+  const byLink = {};
+  comparison.forEach(r => { byLink[r.link_type] = r; });
+  pdrChart.data.datasets[0].data = [
+    byLink.wifi?.avg_pdr || 0,
+    byLink.ble?.avg_pdr  || 0,
+    byLink.lora?.avg_pdr || 0,
+  ];
+  pdrChart.update('none');
+}
+
+function updateRouteTable(routes) {
+  const tbody = document.getElementById('route-tbody');
+  document.getElementById('route-objective-label').textContent =
+    `OBJECTIVE: ${currentObjective.toUpperCase()}`;
+
+  if (!routes.length) {
+    tbody.innerHTML = '<tr><td colspan="5"><div class="no-data"><div class="no-data-icon">◌</div>No routes yet</div></td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = routes.map(r => `
+    <tr>
+      <td>NODE ${r.node_id}</td>
+      <td>NODE ${r.dest_node}</td>
+      <td>NODE ${r.next_hop}</td>
+      <td><span class="link-badge ${r.link_type}">${r.link_type.toUpperCase()}</span></td>
+      <td>${r.cost}</td>
+    </tr>
+  `).join('');
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function getBestLink(links, objective) {
+  const types = ['wifi','ble','lora'].filter(lt => links[lt]);
+  if (!types.length) return null;
+
+  if (objective === 'latency') {
+    return types.reduce((a,b) =>
+      (links[a].avg_latency_ms || 9999) < (links[b].avg_latency_ms || 9999) ? a : b);
+  } else if (objective === 'reliability') {
+    return types.reduce((a,b) =>
+      (links[a].pdr_pct || 0) > (links[b].pdr_pct || 0) ? a : b);
+  } else {
+    const order = ['ble','lora','wifi'];
+    return order.find(lt => types.includes(lt)) || types[0];
+  }
+}
+
+function setObjective(btn) {
+  document.querySelectorAll('.obj-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentObjective = btn.dataset.obj;
+  fetchAll();
+}
+
+function setHistoryLink(link, btn) {
+  document.querySelectorAll('.hist-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentHistoryLink = link;
+  fetchHistory();
+}
+
+// ── Boot ────────────────────────────────────────────────────────────────────
+initCharts();
+fetchAll();
+setInterval(fetchAll, 5000);   // refresh every 5 seconds
+</script>
+</body>
+</html>
