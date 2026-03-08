@@ -55,12 +55,20 @@ def record_received(seq_no: int, link_type: str, rssi: int = 0):
 
 def record_received_timestamp(link_type: str, sent_timestamp_ms: int, rssi: int = 0):
     """
-    Alternative: calculate latency from embedded timestamp in packet.
-    Use when you can't match seq_no (e.g. LoRa broadcast).
+    Calculate latency from embedded timestamp.
+    Sanity check: reject impossibly large or negative latencies.
     """
     latency = time.ticks_diff(time.ticks_ms(), sent_timestamp_ms)
-    if latency < 0 or latency > 60000:
-        return   # sanity check — ignore impossible values
+    
+    # Sanity bounds per link type
+    MAX_LATENCY = {
+        "wifi": 2000,    # WiFi should never exceed 2 seconds
+        "ble":  5000,    # BLE can be slower
+        "lora": 30000,   # LoRa can be very slow
+    }
+    
+    if latency < 0 or latency > MAX_LATENCY.get(link_type, 5000):
+        return   # reject — likely a misclassified or stale packet
 
     _stats[link_type]["received"] += 1
     _stats[link_type]["latencies"].append(latency)
