@@ -97,18 +97,16 @@ def set_receive_callback(callback):
 
 
 def advertise(payload: dict):
-    """
-    Broadcast a BLE HELLO using compact binary encoding.
-    payload must contain 'from'/'f', 'ts', and 's'/'seq_no_metric' keys.
-    """
     if not _ble:
+        print("[BLE] advertise called but _ble is None!")
         return
     try:
         node_id  = payload.get("from") or payload.get("f") or config.NODE_ID
         ts_ms    = payload.get("ts", 0)
-        seq      = payload.get("s")  or payload.get("seq_no_metric", 0)
+        seq      = payload.get("s") or payload.get("seq_no_metric", 0)
         adv_data = _encode_adv(node_id, ts_ms, seq)
         _ble.gap_advertise(config.BLE_INTERVAL_MS * 1000, adv_data)
+        print(f"[BLE] Advertising node={node_id} ts={ts_ms} seq={seq} interval={config.BLE_INTERVAL_MS}ms")
     except Exception as e:
         print(f"[BLE] Advertise error: {e}")
 
